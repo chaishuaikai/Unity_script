@@ -1,0 +1,125 @@
+using UnityEditor;
+using UnityEngine;
+using System.IO;
+
+public class LuaToBytesConverter : EditorWindow
+{
+    [MenuItem("LuaToBytes/Lua To Bytes Converter")]
+    public static void ShowWindow()
+    {
+        GetWindow<LuaToBytesConverter>("Lua To Bytes Converter");
+    }
+
+    private void OnGUI()
+    {
+        GUILayout.Label("", EditorStyles.boldLabel);
+
+        // 将 .lua 转换为 .bytes
+        if (GUILayout.Button(" .lua Convert .bytes"))
+        {
+            ConvertLuaToBytes();
+        }
+
+        // 删除所有 .lua 文件
+        if (GUILayout.Button("Delete.lua"))
+        {
+            if (EditorUtility.DisplayDialog("警告", "确定要删除所有 .lua 文件吗？", "删除", "取消"))
+            {
+                DeleteAllLuaFiles();
+            }
+        }
+
+        // 删除所有 .bytes 文件
+        if (GUILayout.Button("Delete.bytes"))
+        {
+            if (EditorUtility.DisplayDialog("警告", "确定要删除所有 .bytes 文件吗？", "删除", "取消"))
+            {
+                DeleteAllBytesFiles();
+            }
+        }
+    }
+
+    private static void ConvertLuaToBytes()
+    {
+        string luaFolderPath = UnityEngine.Application.dataPath + "/ToLua/Lua";
+
+        if (!Directory.Exists(luaFolderPath))
+        {
+            UnityEngine.Debug.LogError("Lua 文件夹未找到");
+            return;
+        }
+
+        string[] luaFiles = Directory.GetFiles(luaFolderPath, "*.lua", SearchOption.AllDirectories);
+
+        foreach (string luaFilePath in luaFiles)
+        {
+            string fileContent = File.ReadAllText(luaFilePath);
+            string bytesFilePath = luaFilePath.Replace(".lua", ".bytes");
+
+            File.WriteAllBytes(bytesFilePath, System.Text.Encoding.UTF8.GetBytes(fileContent));
+
+            UnityEngine.Debug.Log($"已将 {luaFilePath} 转换为 {bytesFilePath}");
+        }
+
+        AssetDatabase.Refresh();
+        UnityEngine.Debug.Log("所有 .lua 已转换为 .bytes。");
+    }
+
+    private static void DeleteAllLuaFiles()
+    {
+        string luaFolderPath = UnityEngine.Application.dataPath + "/ToLua/Lua";
+
+        if (!Directory.Exists(luaFolderPath))
+        {
+            UnityEngine.Debug.LogError("Lua 文件夹未找到");
+            return;
+        }
+
+        string[] luaFiles = Directory.GetFiles(luaFolderPath, "*.lua", SearchOption.AllDirectories);
+
+        foreach (string luaFilePath in luaFiles)
+        {
+            try
+            {
+                File.Delete(luaFilePath);
+                UnityEngine.Debug.Log($"已删除 {luaFilePath}");
+            }
+            catch (System.Exception ex)
+            {
+                UnityEngine.Debug.LogError($"删除 {luaFilePath} 失败: {ex.Message}");
+            }
+        }
+
+        AssetDatabase.Refresh();
+        UnityEngine.Debug.Log("所有 .lua 文件已成功删除。");
+    }
+
+    private static void DeleteAllBytesFiles()
+    {
+        string bytesFolderPath = UnityEngine.Application.dataPath + "/ToLua/Lua";
+
+        if (!Directory.Exists(bytesFolderPath))
+        {
+            UnityEngine.Debug.LogError("Lua 文件夹未找到");
+            return;
+        }
+
+        string[] bytesFiles = Directory.GetFiles(bytesFolderPath, "*.bytes", SearchOption.AllDirectories);
+
+        foreach (string bytesFilePath in bytesFiles)
+        {
+            try
+            {
+                File.Delete(bytesFilePath);
+                UnityEngine.Debug.Log($"已删除 {bytesFilePath}");
+            }
+            catch (System.Exception ex)
+            {
+                UnityEngine.Debug.LogError($"删除 {bytesFilePath} 失败: {ex.Message}");
+            }
+        }
+
+        AssetDatabase.Refresh();
+        UnityEngine.Debug.Log("所有 .bytes 文件已成功删除。");
+    }
+}

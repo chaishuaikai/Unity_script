@@ -1,0 +1,261 @@
+using Excel; // 引用Excel相关的库
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Data;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
+#if UNITY_EDITOR
+using UnityEditor; // 引用Unity编辑器相关库
+#endif
+using UnityEngine;
+
+#if UNITY_EDITOR
+// 该类用于从CSV或Excel文件生成C#脚本
+public class Table2Script : MonoBehaviour
+{
+	// 在菜单栏添加一个工具项，用于清除已生成的脚本
+	[MenuItem("Tools/Clear Scripts")] // UnityEditor.dll
+	public static void _DelScript()
+	{
+		// 设置输出路径，指向保存脚本的目录
+		string outPath = Application.dataPath + "/91make/DataGen/ConfigScript";
+		// 遍历输出目录中的所有.cs文件
+		foreach (string fname in Directory.EnumerateFiles(outPath, "*.cs"))
+		{
+			print(fname); // 打印文件名
+			File.Delete(fname); // 删除文件
+		}
+		// 刷新资产数据库，使更改生效
+		AssetDatabase.Refresh();
+		print("代码删除完毕"); // 打印删除完毕信息
+	}
+
+	// 在菜单栏添加一个工具项，用于将CSV文件转换为C#脚本
+	[MenuItem("Tools/CSV To Script")]
+	public static void _Csv2Script()
+	{
+		// 输入路径，指向存放CSV文件的目录
+		string inPath = Application.dataPath + "/91make/DataGen/ConfigTable";
+		// 输出路径，指向生成的脚本保存位置
+		string outPath = Application.dataPath + "/91make/DataGen/ConfigScript";
+		// 遍历目录下所有CSV文件
+		foreach (string fname in Directory.EnumerateFiles(inPath, "*.csv")) // 读取每一个文件
+		{
+			string[][] data = LoadCSV(fname); // 读取该CSV文件中的数据，以字符串数组的形式保存下来
+
+			if (data.Length == 0)
+				continue; // 如果没有数据，跳过
+
+			// 根据读取到的数据生成脚本
+			GenScript(data, outPath); // 从这个字符串数组解析出对应的数据
+		}
+		// 刷新资产数据库
+		AssetDatabase.Refresh();
+		print("代码生成完毕"); // 打印生成完毕信息
+	}
+
+	// 在菜单栏添加一个工具项，用于将Excel文件转换为C#脚本
+	[MenuItem("Tools/Excel To Script")]
+	public static void _Xls2Script()
+	{
+		// 输入路径，指向存放Excel文件的目录
+		string inPath = Application.dataPath + "/91make/DataGen/ConfigTable";
+		// 输出路径，指向生成的脚本保存位置
+		string outPath = Application.dataPath + "/91make/DataGen/ConfigScript";
+		// 遍历目录下所有Excel文件
+		foreach (string fname in Directory.EnumerateFiles(inPath, "*.xls"))
+		{
+			string[][] data = LoadXls(fname); // 读取Excel文件中的数据
+			GenScript(data, outPath); // 根据读取到的数据生成脚本
+		}
+		// 刷新资产数据库
+		AssetDatabase.Refresh();
+		print("代码生成完毕"); // 打印生成完毕信息
+	}
+
+	// 加载Excel文件的内容
+	static string[][] LoadXls(string filePath)
+	{
+		// 打开文件流
+		FileStream stream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+		IExcelDataReader excelReader = null;
+		var fi = new FileInfo(filePath);
+		// 根据文件扩展名选择合适的Excel读取器
+		if (fi.Extension == ".xls")
+		{
+			excelReader = ExcelReaderFactory.CreateBinaryReader(stream); // 读取xls文件
+		}
+		else if (fi.Extension == ".xlsx")
+		{
+			excelReader = ExcelReaderFactory.CreateOpenXmlReader(stream); // 读取xlsx文件
+		}
+		else
+		{
+			Debug.Log("无法读取非Excel文件"); // 如果文件类型不是Excel，打印错误信息
+			return null;
+		}
+
+		// 读取Excel内容
+		DataSet result = excelReader.AsDataSet();
+		// 获取Excel表格的行数和列数
+		int columnNum = result.Tables[0].Columns.Count;
+		int rowNum = result.Tables[0].Rows.Count;
+		DataRowCollection coll = result.Tables[0].Rows;
+
+		// 初始化一个锯齿数组存储读取到的数据
+		string[][] data = new string[rowNum][]; // 支持锯齿数组
+		for (int row = 0; row < rowNum; row++)
+		{
+			int colNum = coll[row].ItemArray.Length;
+			string[] cols = new string[colNum];
+			// 遍历每一列，保存每个单元格的值
+			for(int col = 0; col < colNum; col++)
+			{
+				cols[col] = coll[row].ItemArray[col].ToString();
+			}
+			data[row] = cols; // 保存该行数据
+		}
+
+		return data; // 返回读取到的数据
+	}
+
+	// 定义一些常量和枚举
+	public enum TypeHint
+	{
+		Enum,
+		Array,
+	}
+
+	// 定义表格元数据索引常量
+	public const int META_NAME = 0;
+	public const int META_VALUE = 1;
+	public const int COMMNET = 3;
+	public const int FIELD_NAME = 4;
+	public const int FIELD_TYPE = 5;
+	public const int NAMESPACES = 2;
+	public const int FIELD_HINT = 6;
+	public const int DATA_ROW_START = 7;
+
+	// C#类的模板定义
+	public const string CLASS_DEF = @"
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+{NAMESPACE_LIST}
+
+[Serializable]
+public partial class {ROW_NAME}
+{
+{FIELD_LIST}
+}
+
+[Serializable]
+public partial class {CLASS_NAME}
+{
+	public List<{ROW_NAME}> list = new List<{ROW_NAME}>();
+
+	public {CLASS_NAME}()
+	{
+{ROW_LIST}
+	}
+
+	public static {CLASS_NAME} instance = new {CLASS_NAME}();
+}
+";
+
+	// 根据表格数据生成C#脚本
+	public static void GenScript(string[][] data, string path)
+	{
+		// 获取类名和行名
+		string className = data[META_VALUE][1];
+		string rowName = data[META_VALUE][2];
+
+		// 构建行数据列表
+		StringBuilder rowList = new StringBuilder();
+		for (int row = DATA_ROW_START; row < data.Length; row++)
+		{
+			StringBuilder fieldValues = new StringBuilder();
+			// 遍历每一列，构建字段值
+			for (int col = 1; col < data[row].Length; col++)
+			{
+				string fieldHint = data[FIELD_HINT][col];
+				string fieldName = data[FIELD_NAME][col];
+				string fieldType = data[FIELD_TYPE][col];
+				string fieldValue = data[row][col];
+
+				// 根据字段类型和提示处理字段值
+				fieldValue = ProcessFieldValueByHint(fieldValue, fieldType, fieldHint);
+
+				// 拼接字段赋值语句
+				fieldValues.AppendLine($"\t\t\t{fieldName} = {fieldValue},");
+			}
+			// 拼接行数据
+			rowList.AppendLine($"\t\tlist.Add(new {rowName}(){{\r\n{fieldValues}\t\t}});\r\n");
+		}
+
+		// 构建字段定义列表
+		StringBuilder fieldDefs = new StringBuilder();
+		for (int col = 1; col < data[FIELD_NAME].Length; col++)
+		{
+			string fieldHint = data[FIELD_HINT][col];
+			fieldDefs.AppendLine($"\t\tpublic {data[FIELD_TYPE][col]}{(fieldHint.Contains("Array")?"[]":"")} {data[FIELD_NAME][col]};\r\n");
+		}
+
+		// 构建命名空间列表
+		StringBuilder namespaceList = new StringBuilder();
+		for (int col = 1; col < data[NAMESPACES].Length; col++)
+		{
+			if (string.IsNullOrEmpty(data[NAMESPACES][col]))
+				continue;
+			namespaceList.AppendLine($"using {data[NAMESPACES][col]};\r\n");
+		}
+
+		// 填充模板
+		StringBuilder classImpl = new StringBuilder(CLASS_DEF);
+		classImpl.Replace("{CLASS_NAME}", className);
+		classImpl.Replace("{FIELD_LIST}", fieldDefs.ToString());
+		classImpl.Replace("{ROW_NAME}", rowName);
+		classImpl.Replace("{ROW_LIST}", rowList.ToString());
+		classImpl.Replace("{NAMESPACE_LIST}", namespaceList.ToString());
+
+		// 生成脚本内容
+		string script = classImpl.ToString();
+		print(script); // 打印脚本内容
+
+		// 写入脚本文件
+		string fname = path + $"/{className}.cs";
+		File.Delete(fname); // 如果文件存在，先删除
+		File.WriteAllText(fname, script); // 写入新的脚本
+	}
+
+	// 根据字段类型和提示处理字段值
+	static string ProcessFieldValueByHint(string value, string type, string hint)
+	{
+		if (hint.Contains("Enum"))
+		{
+			// 处理枚举类型字段
+			string enumName = type;
+			value = $"{enumName}.{value}"; // 将字段值转换为枚举成员
+		}
+		else if (hint.Contains("Array"))
+		{
+			// 处理数组类型字段
+			value = $"new {type}{{{value}}}"; // 将字段值转换为数组
+		}
+		else if (type.Contains("int"))
+		{
+			// 处理整型字段
+			value = int.Parse(value).ToString();
+		}
+		else if (type.Contains("float"))
+		{
+			// 处理浮点型字段
+			value = float.Parse(value).ToString("F");
+		}
+		return value; // 返回处理后的字段值
+	}
+}
